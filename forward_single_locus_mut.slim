@@ -1,0 +1,137 @@
+// CLASSICAL FORWARD SIMULATION OF SINGLE LOCUS FLUCTUATING SELECTION
+initialize() {
+	
+	defineConstant("GenomeSize", 1000000);  // genome size
+	
+	defineConstant("s", 1); // selection coefficient
+	
+	defineConstant("n", 1e4); //  scaled population size
+	
+	defineConstant("h", 0.6);  //  dominance coefficient
+	
+	defineConstant("g_s", 10);  // generations per summer
+	
+	defineConstant("g_w", 10);  // generations per winter 
+	
+	defineConstant("g", (g_s + g_w));  // generations per seasonal cycle     
+	
+	defineConstant("mut", 1e-7); // neutral mutation rate
+	
+	defineConstant("rr", 1e-6); // scaled recombination rate
+	
+	if (!exists("sim_run"))
+	{defineConstant("sim_run", 1);} // simulation identifier
+	
+	if (!exists("fit"))
+	{defineConstant("fit",1);} //if fit = 0 fitness function switched off
+	
+	initializeMutationRate(mut);
+	
+	initializeRecombinationRate(rr);
+	
+	initializeMutationType("m1", 0.5, "f", 0.0);  // neutral mutations
+	
+	initializeMutationType("m2", 0.0, "f", 0.0);  // seasonal mutations
+	
+	initializeGenomicElementType("g1", m1, 1.0);
+	
+	initializeGenomicElement(g1, 0, GenomeSize-1);
+	
+	m2.color = "pink";
+	m2.convertToSubstitution = F;
+}
+
+
+1 late() {
+	// read in population data from classical burn-in
+	sim.readFromPopulationFile(paste("~/2023_popgen_benchmarking/burnin_mut_ "+ asString(sim_run) + " .txt"));
+}
+
+100001 late(){
+	//sample single individual and drawn in selected mutation
+	target = sample(p1.genomes, asInteger(1));
+	target.addNewDrawnMutation(m2, asInteger(GenomeSize/2));
+	
+	// check de novo frequency of selected mutation
+	if (sim.mutationFrequencies(p1, mutations=sim.mutationsOfType(m2))[0] != (1/(2*n))){
+		sim.simulationFinished();
+		catn("ERROR: SELECTED MUTATION NOT AT" + (1/(2*n))+ "STARTING FREQUENCY");
+	}
+	// output sample of 100 individuals
+	p1.outputSample(100, replace=F, filePath=paste("~/2023_popgen_benchmarking/forward_single_mut"+ sim_run +".txt"));
+
+}
+
+/// single locus fluctuating selection fitness model from Wittmann et al. (2023)
+s1 fitnessEffect() { //summer
+	if (fit == 0|sim.cycle<=100000){
+		return 1.0;
+	} else{
+		m2mut=sim.mutationsOfType(m2);
+		mut_count=individual.genomes.mutationFrequenciesInGenomes(mutations=m2mut); //determine if het or homozygous
+		if (mut_count == 0.5){
+			if (modValueSeason >= 0 & modValueSeason < g_s) { //summer
+				ft=1.0+(h*s);}
+			else { // winter
+				ft=1.0+(h*s);}
+		} else {
+			if (mut_count==0){
+				if (modValueSeason >= 0 & modValueSeason < g_s) { //summer
+					ft=1.0;
+				} else { // winter
+					ft=1.0+(s);}
+			}else {
+				if (modValueSeason >= 0 & modValueSeason < g_s) { //summer
+					ft=1.0+(s);}
+				else { // winter
+					ft=1.0;}}}}
+	return ft;
+}
+
+
+100001:140000 early(){
+	defineGlobal("gen", sim.cycle);
+	defineGlobal("modValueSeason",integerMod(gen, g));
+}
+
+100001:140000 late(){
+	// track fixed selected mutations
+	defineGlobal("fixed", sum(sim.mutationFrequencies(p1)==1));
+	
+	// binary 2-season environment
+	if (modValueSeason >= 0 & modValueSeason < g_s) { //summer
+		
+		if (exists("slimgui")) {cat("Summer\n");}
+	}
+	if (modValueSeason >= g_s) { //winter
+		
+		if (exists("slimgui")) {cat("Winter\n");}
+	}
+	
+	// output sample of 100 individuals every 10000 generations
+	if (integerMod(gen,10000)==0){
+		p1.outputSample(100, replace=F, filePath=paste("~/2023_popgen_benchmarking/forward_single_mut"+ sim_run +".txt"), append=T);
+	}
+	
+	//if selected mutation is lost, restart simulation
+	if (sim.countOfMutationsOfType(m2) == 0)
+	{outcome = paste(group+ "_"+sim_run + ": LOST at gen "+ gen+" – RESTARTING\n");
+		catn(outcome);
+		sim.readFromPopulationFile(paste("~/2023_popgen_benchmarking/burnin_mut_ "+ asString(sim_run) + " .txt"));
+	}
+}
+
+140000 late() {
+	// output full population at final generation
+	sim.outputFull(paste("~/2023_popgen_benchmarking/forward_single_mut"+ sim_run +".txt"), append=T);
+	
+	// record memory usage
+	mem = usage(peak=T);
+	line4 = paste("Memory usage: "+ mem);
+	catn(line4);
+	
+	// output text file of memory usage
+	writeFile("~/2023_popgen_benchmarking/forward_benchmarking_mem.txt", paste("mut", "single_locus", mem, sep="\t"), append=T);
+
+}
+

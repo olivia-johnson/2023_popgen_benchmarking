@@ -1,0 +1,139 @@
+// FORWARD SIMULATION WITH TREE SEQEUNCE RECORDING AND SINGLE LOCUS SELECTION MODEL
+initialize() {
+	
+	defineConstant("GenomeSize", 1e6);  // genome size
+	
+	defineConstant("s", 1); // selection coefficient
+	
+	defineConstant("n", 1e4); //  scaled population size
+	
+	defineConstant("h", 0.6);  //  dominance coefficient
+	
+	defineConstant("g_s", 10);  // generations per summer
+	
+	defineConstant("g_w", 10);  // generations per winter 
+	
+	defineConstant("g", (g_s + g_w));  // generations per seasonal cycle     
+	
+	defineConstant("mut", 0.0); // neutral mutation rate
+	
+	defineConstant("rr", 1e-6); // scaled recombination rate
+	
+	if (!exists("sim_run"))
+	{defineConstant("sim_run", 1);} // simulation identifier
+	
+	if (!exists("fit"))
+	{defineConstant("fit",1);} //if fit = 0 fitness function switched off
+	
+	initializeMutationRate(mut);
+	
+	initializeRecombinationRate(rr);
+	
+	initializeMutationType("m1", 0.0, "f", 0.0);  // seasonal mutations
+	
+	initializeGenomicElementType("g1", m1, 1.0);
+	
+	initializeGenomicElement(g1, 0, GenomeSize-1);
+	
+	m1.color = "pink";
+	m1.convertToSubstitution = F;
+	
+	initializeTreeSeq(); // initiate tree sequence recording
+}
+
+1 late() {
+	// read in population from msprime burn-in
+	sim.readFromPopulationFile(paste("~/2023_popgen_benchmarking/burnin_"+sim_run+".trees"));
+	
+	// sample single individual
+	target = sample(p0.genomes, asInteger(1));
+	
+	// introduce single selected mutation to sampled individual
+	target.addNewDrawnMutation(m1, asInteger(GenomeSize/2));
+	
+	// check frequence is equal to de novo frequency
+	if (sim.mutationFrequencies(p0)[0] != (1/(2*n))){
+		sim.simulationFinished();
+		catn("ERROR: SELECTED MUTATION NOT AT" + (1/(2*n))+ "STARTING FREQUENCY");
+	}
+	// sample 100 individuals and remember them in tree sequence
+	rInd= sample(p0.individuals, 100);
+	sim.treeSeqRememberIndividuals(rInd);
+}
+
+// single locus fluctuating selection fitness model from Wittmann et al. (2023)
+s1 fitnessEffect() { //summer
+	if (fit == 0){
+		return 1.0;
+	} else{
+		mut_count=individual.genomes.mutationFrequenciesInGenomes(); //determine if het or homozygous
+		if (mut_count == 0.5){
+			if (modValueSeason >= 0 & modValueSeason < g_s) { //summer
+				ft=1.0+(h*s);}
+			else { // winter
+				ft=1.0+(h*s);}
+		} else {
+			if (mut_count==0){
+				if (modValueSeason >= 0 & modValueSeason < g_s) { //summer
+					ft=1.0;
+				} else { // winter
+					ft=1.0+(s);}
+			}else {
+				if (modValueSeason >= 0 & modValueSeason < g_s) { //summer
+					ft=1.0+(s);}
+				else { // winter
+					ft=1.0;}}}}
+	return ft;
+}
+
+
+1:40000 early(){
+	defineGlobal("gen", sim.cycle);
+	defineGlobal("modValueSeason",integerMod(gen, g));
+}
+
+
+1:40000 late(){
+	// track number of fixed mutations
+	defineGlobal("fixed", sum(sim.mutationFrequencies(p0)==1));
+	
+	// binary 2-season environment 
+	if (modValueSeason >= 0 & modValueSeason < g_s) { //summer
+		
+		if (exists("slimgui")) {cat("Summer\n");}
+	}
+	if (modValueSeason >= g_s) { //winter
+		
+		if (exists("slimgui")) {cat("Winter\n");}
+	}
+	
+	// if mutation is lost restart simulation
+	if (sim.countOfMutationsOfType(m1) == 0)
+	{outcome = paste(group+ "_"+sim_run + ": LOST at gen "+ gen+" – RESTARTING\n");
+		catn(outcome);
+		sim.readFromPopulationFile(paste("~/2023_popgen_benchmarking/burnin_seglift_group_"+group+"_"+sim_run+".trees"));
+		
+		target = sample(p0.genomes, asInteger(1));
+		target.addNewDrawnMutation(m1, asInteger(GenomeSize/2));}
+	
+	//sample 100 individuals every 10,000 generations and save in tree sequence
+	if (integerMod(gen, 10000)==0){
+		rInd= sample(p0.individuals, 100);
+		sim.treeSeqRememberIndividuals(rInd);}
+
+}
+
+// output while population in final generation (4N for selection to reach equilibrium)
+40000 late() {
+	// output tree sequence
+	sim.treeSeqOutput(paste("~/2023_popgen_benchmarking/treeseq_single_"+ asString(sim_run) + ".trees"));
+	
+	// record peak memory usage
+	mem = usage(peak=T);
+	line4 = paste("Memory usage: "+ mem);
+	catn(line4);
+	
+	// write memory usage to txt file
+	writeFile("~/2023_popgen_benchmarking/forward_benchmarking_mem.txt", paste("ts", "single_locus", mem, sep="\t"), append=T);
+}
+

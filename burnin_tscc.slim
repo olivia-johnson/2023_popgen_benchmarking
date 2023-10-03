@@ -1,0 +1,51 @@
+//  SLIM BURN-IN WITH TREE SEQUENCE RECORDING (checkCoalescence = T)
+initialize() {
+	initializeTreeSeq(checkCoalescence=T); // intiate tree sequence recording and checkCoalescence
+	
+	if (!exists("sim_run"))
+	{defineConstant("sim_run", 1);} // simulation iedntifier
+	
+	defineConstant("startTime", time()); // simulation start time
+	
+	defineGlobal("N", 1e4);	// scaled population size
+	
+	defineConstant("sequenceLength", 1e6); // sequence length
+	
+	initializeMutationRate(0); // neutral mutation rate
+	
+	initializeMutationType("m1", 0.5, "f", 0.0);
+	
+	initializeGenomicElementType("g1", m1, 1.0);
+	
+	initializeGenomicElement(g1, 0, sequenceLength);
+	
+	initializeRecombinationRate(1e-6); // scaled recombination rate
+}
+
+// create a population of N individuals
+1 early() {
+	sim.addSubpop("p1", N);
+}
+
+// run simualtion until all lineages coalesced
+1:500000 late() {
+
+	coalescence = sim.treeSeqCoalesced();
+	if (sim.treeSeqCoalesced()){ // if lineages coalesced
+		
+		defineConstant("finalGen", sim.cycle); // sample final generation
+		
+		//output tree sequence
+		sim.treeSeqOutput(paste0("~/2023_popgen_benchmarking/burnin_tscc_", sim_run,".trees"));
+		
+		// record memory usage
+		mem = (usage(peak=T))*1024*1024;
+		catn(mem);
+		catn(coalescence); // print coalescence
+		
+		defineConstant("endTime", time()); // simulation end time
+		
+		// write resource usage into txt file
+		writeFile("~/2023_popgen_benchmarking/burnin_benchmarking_slim_tscc.txt", paste(startTime, endTime, mem, finalGen, sep="\t"), append=T);
+		sim.simulationFinished();}
+}

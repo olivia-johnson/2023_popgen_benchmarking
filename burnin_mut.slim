@@ -1,0 +1,42 @@
+// CLASSICAL BURN-IN
+initialize() {
+	defineConstant("startTime", time()); // simulation start time
+	
+	defineGlobal("N", 1e4);	// scaled population size
+	
+	defineConstant("sequenceLength", 1e6); // sequence length (1Mb)
+	
+	if (!exists("sim_run"))
+	{defineConstant("sim_run", 1);}	//simulation identifier
+	
+	initializeMutationRate(1e-7);	// scaled mutation rate
+	
+	initializeRecombinationRate(1e-6);	// scaled recombinaiton rate
+	
+	// m1 mutation type: neutral
+	initializeMutationType("m1", 0.5, "f", 0.0);
+	
+	initializeGenomicElementType("g1", m1, 1.0);
+	
+	initializeGenomicElement(g1, 0, sequenceLength);
+}
+
+// create a population of N individuals
+1 early() {
+	sim.addSubpop("p1", N);
+}
+
+ //output final population at generation 10N
+100000 late() {
+
+	sim.outputFull(paste("~/2023_popgen_benchmarking/burnin_mut_", sim_run, ".txt"));	// output in classical format
+
+	mem = (usage(peak=T))*1024*1024;	// record peak memory usage
+	catn(mem);
+	
+	defineConstant("endTime", time()); // simulation end time
+	
+	div= calcHeterozygosity(p1.genomes);	// calculate diversity
+	
+	writeFile("~/2023_popgen_benchmarking/burnin_benchmarking_slim_mut.txt", paste(startTime, endTime, mem, div, sep="\t"), append=T);	// output data into txt file
+}
