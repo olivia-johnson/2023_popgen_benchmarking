@@ -1,11 +1,8 @@
 ## Johnson et al 2023 - Population genetic simulation: Benchmarking frameworks for non-standard models of natural selection ##
 
-library(data.table)
-library(ggplot2)
-library(lubridate)
-library(ggpubr)
-library(writexl)
-library(scales)
+## Load packages and install any missing from the user's R library
+if (!require("pacman")) install.packages("pacman")
+pacman::p_load(data.table, ggplot2, lubridate, ggpubr, writexl, scales)
 
 setwd("~/2023_popgen_benchmarking/")
 
@@ -16,6 +13,8 @@ msprime_ts=fread("~/2023_popgen_benchmarking/burnin_benchmarking_msprime.txt")
 msprime_ts[, simulator:="msprime"]
 msprime_ts[, data_type:=ifelse(sim_type=="msprime_ts", "Tree Sequence","Tree Sequence\nwith Neutral Mutations")]
 msprime_ts[, final_gen:=NA]
+msprime_ts[, colcode:=ifelse(sim_type=="msprime_ts", "Tree Sequence","Tree Sequence with Neutral Mutations")]
+
 
   # read in SLiM tree sequence (10N) data
 slim_ts=fread("~/2023_popgen_benchmarking/burnin_benchmarking_slim_ts.txt")
@@ -28,6 +27,8 @@ slim_ts[, sim_type:="slim_ts"]
 slim_ts[, simulator:="SLiM"]
 slim_ts[, data_type:="Tree Sequence\n(10Ne)"]
 slim_ts[, final_gen:=100000]
+slim_ts[, colcode:="Tree Sequence"]
+
 
   # read in SLiM tree sequenc (checkCoalescence = T) data
 slim_tscc=fread("~/2023_popgen_benchmarking/burnin_benchmarking_slim_tscc.txt")
@@ -39,6 +40,8 @@ slim_tscc[, time:=ifelse(end_time>start_time, end_time-start_time,((86400-start_
 slim_tscc[, sim_type:="slim_tscc"]
 slim_tscc[, simulator:="SLiM"]
 slim_tscc[, data_type:="Tree Sequence\n(Coalesced)"]
+slim_tscc[, colcode:="Tree Sequence"]
+
 
   # read in classical SLiM burn-in data
 slim_mut=fread("~/2023_popgen_benchmarking/burnin_benchmarking_slim_mut.txt")
@@ -51,9 +54,11 @@ slim_mut[, sim_type:="slim_mut"]
 slim_mut[, simulator:="SLiM"]
 slim_mut[, data_type:="Classical\n(10Ne)"]
 slim_mut[, final_gen:=100000]
+slim_mut[, colcode:="Standard Non-genealogical"]
+
 
 # compile into single data object
-data=rbind(msprime_ts,slim_ts[,.(time, memory, diversity,sim_type, simulator, data_type, final_gen)],slim_tscc[,.(time, memory, diversity,sim_type, simulator, data_type, final_gen)], slim_mut[,.(time, memory, diversity, sim_type, simulator, data_type,final_gen)])
+data=rbind(msprime_ts,slim_ts[,.(time, memory, diversity,sim_type, simulator, data_type, colcode, final_gen)],slim_tscc[,.(time, memory, diversity,sim_type, simulator, data_type, colcode, final_gen)], slim_mut[,.(time, memory, diversity, sim_type, simulator, data_type, colcode,final_gen)])
 data[, memory:=memory/1e6]  ## convert memory to MB
 
 # calculate mean, variance, min and max of each resource for each simualtion type
@@ -68,43 +73,58 @@ t.test(data[sim_type=="msprime_ts", memory], data[sim_type=="msprime_mut", memor
   ## significcant difference in time  between msprime tree sequence and tree sequence with neutral mutation
 t.test(data[sim_type=="msprime_ts", time], data[sim_type=="msprime_mut", time])
 
+## test for normality of distribution of diversity
+shapiro.test(data[sim_type=="msprime_mut", diversity]) # msprime coalescent with neutral mutations
+shapiro.test(data[sim_type=="slim_ts", diversity]) # SLiM tree sequence (10Ne)
+shapiro.test(data[sim_type=="slim_tscc", diversity]) # SLiM tree sequence (checkCoalescence = T)
+shapiro.test(data[sim_type=="slim_mut", diversity]) # SLiM classical (10Ne)
+
   ## Is diversity significantly different from neutral expectation
 theta=4*10000*1e-7
 expected_div=theta/(1+theta)
-t.test(data[sim_type=="msprime_ts", diversity], mu=expected_div) # msprime coalescent with just tree sequence
+
+ # parameteric t-test
 t.test(data[sim_type=="msprime_mut", diversity], mu=expected_div) # msprime coalescent with neutral mutations
 t.test(data[sim_type=="slim_ts", diversity], mu=expected_div) # SLiM tree sequence (10Ne)
 t.test(data[sim_type=="slim_tscc", diversity], mu=expected_div) # SLiM tree sequence (checkCoalescence = T)
 t.test(data[sim_type=="slim_mut", diversity], mu=expected_div) # SLiM classical (10Ne)
 
+ # non-parametric Mann-Whitney U-Test
+wilcox.test(data[sim_type=="msprime_mut", diversity], mu=expected_div) # msprime coalescent with neutral mutations
+wilcox.test(data[sim_type=="slim_ts", diversity], mu=expected_div) # SLiM tree sequence (10Ne)
+wilcox.test(data[sim_type=="slim_tscc", diversity], mu=expected_div) # SLiM tree sequence (checkCoalescence = T)
+wilcox.test(data[sim_type=="slim_mut", diversity], mu=expected_div) # SLiM classical (10Ne)
 
 ## FIGURE 3
 mem = ggplot(data, aes(x=data_type))+
-  geom_boxplot(aes( y=memory, fill=sim_type))+
-  labs(x="Simulation Type",y="Memory Usage (MB)") +
+  geom_boxplot(aes( y=memory, fill=colcode))+
+  labs(x="Simulation Type",y="Memory Usage (MB)", fill="Data Type") +
   theme_bw()+
-  theme(legend.position = "none")+ 
+  theme(legend.position = "bottom")+ 
   facet_wrap("simulator", scale="free", drop=TRUE)+
-  scale_fill_manual(values = c("#C77CFF", "#F8766D", "#00BFC4", "#F8766D", "#F8766D"))
+  scale_fill_manual(values = c("#F8766D","#C77CFF", "#00BFC4"), 
+                    breaks = c("Tree Sequence", "Tree Sequence with Neutral Mutations", "Standard Non-genealogical")) 
 
 time = ggplot(data,aes(x=data_type))+
-  geom_boxplot(aes(y=time, fill=sim_type))+
+  geom_boxplot(aes(y=time, fill=colcode))+
   labs(x="",y="Time (seconds)")+
   theme_bw() +
   theme(legend.position = "none")+ 
   facet_wrap("simulator", scale="free", drop=TRUE)+ 
-  scale_fill_manual(values = c("#C77CFF", "#F8766D", "#00BFC4", "#F8766D", "#F8766D"))
+  scale_fill_manual(values = c("#F8766D","#C77CFF", "#00BFC4"), 
+                    breaks = c("Tree Sequence", "Tree Sequence with Neutral Mutations", "Standard Non-genealogical")) 
 ggexport(burnin, filename="figure_3.pdf", width=7.5, height=7)
 ggsave(plot=burnin, filename="figure_3.jpg", width=7.5, height=7)
 
 
 ## FIGURE 4
 div=ggplot(data[sim_type!="msprime_ts"], aes(x=data_type)) + 
-  geom_boxplot(aes(y = diversity/expected_div, fill=sim_type))+
-  labs(x="Simulation Type",y="Relative Diversity") +
-  theme_bw()+theme(legend.position = "none")+ 
+  geom_boxplot(aes(y = diversity/expected_div, fill=colcode))+
+  labs(x="Simulation Type",y="Relative Diversity", fill="Data Type") +
+  theme_bw()+theme(legend.position = "bottom")+ 
   facet_grid(~simulator, drop=TRUE, scale='free_x', space='free_x') +
-  scale_fill_manual(values = c("#C77CFF", "#F8766D", "#00BFC4", "#F8766D", "#F8766D")) 
+  scale_fill_manual(values = c("#F8766D","#C77CFF", "#00BFC4"), 
+                    breaks = c("Tree Sequence", "Tree Sequence with Neutral Mutations", "Standard Non-genealogical")) 
 ggexport(div, filename="figure_4.pdf", height = 4, width=8)
 ggsave(plot=div, filename="figure_4.jpg", height = 4, width=8)
 
@@ -124,26 +144,31 @@ forward_mem[, `:=` ( mean_memory=mean(memory),  var_mem=var(memory), max_mem=max
   # add additional labels
 forward_time[, sim_type:=ifelse(sim_type=="mut", "Classical", "Tree Sequence"), by="sim_type"]
 forward_time[, model:=ifelse(model=="single_locus", "Single Locus", "Multilocus"), by="model"]
+forward_time[, colcode:=ifelse(sim_type=="Classical", "Standard Non-genealogical", "Tree Sequence"), by="sim_type"]
 forward_mem[, sim_type:=ifelse(sim_type=="mut", "Classical", "Tree Sequence"), by="sim_type"]
 forward_mem[, model:=ifelse(model=="single_locus", "Single Locus", "Multilocus"), by="model"]
+forward_mem[, colcode:=ifelse(sim_type=="Classical", "Standard Non-genealogical", "Tree Sequence"), by="sim_type"]
+
   # formulate summary table
-forward=merge(unique(forward_mem[, .(sim_type, model, mean_memory, var_mem, max_mem, min_mem)]), unique(forward_time[, .(sim_type, model, mean_time, var_time, max_time, min_time)]), by=c("sim_type", "model"))
+forward=merge(unique(forward_mem[, .(sim_type, colcode,model, mean_memory, var_mem, max_mem, min_mem)]), unique(forward_time[, .(sim_type, colcode,model, mean_time, var_time, max_time, min_time)]), by=c("sim_type", "model"))
 
 ## FIGURE 5
 plot1 = ggplot(forward_mem)+
-  geom_boxplot(aes(x=sim_type, y=memory, fill=sim_type))+
+  geom_boxplot(aes(x=sim_type, y=memory, fill=colcode))+
   facet_wrap(~factor(model, levels=c("Single Locus", "Multilocus")))+theme_bw()+ 
-  scale_fill_manual(values=c("#00BFC4","#F8766D"))+
-  labs(y="Memory (MB)", x="Simulation Type")+
+  scale_fill_manual(values = c("#F8766D","#C77CFF", "#00BFC4"), 
+                    breaks = c("Tree Sequence", "Tree Sequence with Neutral Mutations", "Standard Non-genealogical")) +
+  labs(y="Memory (MB)", x="Simulation Type", fill="Data Type")+
   theme(legend.position = "none")+
   scale_y_log10()
 
 plot2 = ggplot(forward_time)+
-  geom_boxplot(aes(x=sim_type, y=time, fill=sim_type))+
+  geom_boxplot(aes(x=sim_type, y=time, fill=colcode))+
   theme_bw()+
   facet_wrap(~factor(model, levels=c("Single Locus", "Multilocus")))+ 
-  scale_fill_manual(values=c("#00BFC4","#F8766D"))+
-  labs(y="Time (seconds)", x="Simulation Type")+
+  scale_fill_manual(values = c("#F8766D","#C77CFF", "#00BFC4"), 
+                    breaks = c("Tree Sequence", "Tree Sequence with Neutral Mutations", "Standard Non-genealogical")) +
+  labs(y="Time (seconds)", x="Simulation Type", fill="Data Type")+
   scale_y_log10()+
   theme(legend.position = "none", axis.title.x.bottom = element_blank())
 
@@ -168,15 +193,14 @@ analysis_sum = unique(analysis[, .(stat_type, data_type, model, stat, mean_memor
 ## FIGURE 6
   # memory usage
 plot3.1 = ggplot(analysis[stat=="Nucleotide Diversity"& x_lab!="Tree Sequence \n Allele-based"], aes(x=stat_type))+
-  geom_boxplot(aes(x=stat_type, y=memory, fill=stat_type))+ 
-  scale_fill_manual(values=c("#00BFC4","#F8766D"))+
-  theme_bw()+coord_cartesian(y=c(0, 2.25))+
+  geom_boxplot(aes(x=stat_type, y=memory, fill=colcode))+ 
+  scale_fill_manual(values = c("#F8766D","#C77CFF", "#00BFC4"), breaks = c("Tree Sequence", "Tree Sequence with Neutral Mutations", "Standard Non-genealogical"))  theme_bw()+coord_cartesian(y=c(0, 2.25))+
   facet_grid(model~stat)+
   theme( axis.title.y.left = element_blank(),legend.position = "none", axis.title.x.bottom = element_blank(), 
          strip.text.y = element_blank())
 plot3.2 = ggplot(analysis[stat=="Tajima's D"& x_lab!="Tree Sequence \n Allele-based"], aes(x=stat_type))+
-  geom_boxplot(aes(x=stat_type, y=memory,fill=stat_type))+
-  theme_bw()+ scale_fill_manual(values=c("#00BFC4","#F8766D"))+
+  geom_boxplot(aes(x=stat_type, y=memory,fill=colcode))+
+  theme_bw()+ scale_fill_manual(values = c("#F8766D","#C77CFF", "#00BFC4"), breaks = c("Tree Sequence", "Tree Sequence with Neutral Mutations", "Standard Non-genealogical"))
   facet_grid(model~stat)+
   coord_cartesian(y=c(0, 2.25))+
   theme(strip.text.y = element_blank(),legend.position = "none", axis.title.y.left = element_blank(), 
@@ -186,18 +210,16 @@ plot3=annotate_figure(plot3, left = "Memory (MB)")
 
   # calculation time
 plot4.1 = ggplot(analysis[stat=="Nucleotide Diversity"& x_lab!="Tree Sequence \n Allele-based"], aes(x=stat_type))+
-  geom_boxplot(aes(x=stat_type, y=calc_time,fill=stat_type))+
+  geom_boxplot(aes(x=stat_type, y=calc_time,fill=colcode))+
   theme_bw()+ 
-  scale_fill_manual(values=c("#00BFC4","#F8766D"))+
-  facet_grid(model~stat)+
+  scale_fill_manual(values = c("#F8766D","#C77CFF", "#00BFC4"), breaks = c("Tree Sequence", "Tree Sequence with Neutral Mutations", "Standard Non-genealogical"))  facet_grid(model~stat)+
   coord_cartesian(y=c(0, 1.5))+
   theme( axis.title.y.left = element_blank(),legend.position = "none", axis.title.x.bottom = element_blank(), 
          strip.text.y = element_blank())
 plot4.2 = ggplot(analysis[stat=="Tajima's D"& x_lab!="Tree Sequence \n Allele-based"], aes(x=stat_type))+
-  geom_boxplot(aes(x=stat_type, y=calc_time,fill=stat_type))+
+  geom_boxplot(aes(x=stat_type, y=calc_time,fill=colcode))+
   theme_bw()+ 
-  scale_fill_manual(values=c("#00BFC4","#F8766D"))+
-  facet_grid(model~stat)+ 
+  scale_fill_manual(values = c("#F8766D","#C77CFF", "#00BFC4"), breaks = c("Tree Sequence", "Tree Sequence with Neutral Mutations", "Standard Non-genealogical"))  facet_grid(model~stat)+ 
   coord_cartesian(y=c(0, 1.5))+
   theme(strip.text.y = element_blank(),legend.position = "none", axis.title.y.left  = element_blank(), 
         axis.title.x.bottom = element_blank())
@@ -207,23 +229,20 @@ plot4=annotate_figure(plot4, left = "Calculation time (seconds)")
 
   # total time
 plot5.1 = ggplot(analysis[stat=="Nucleotide Diversity"& x_lab!="Tree Sequence \n Allele-based"], aes(x=stat_type))+
-  geom_boxplot(aes(x=stat_type, y=total_time,fill=stat_type))+
-  theme_bw()+ scale_fill_manual(values=c("#00BFC4","#F8766D"))+
-  facet_grid(model~stat)+
+  geom_boxplot(aes(x=stat_type, y=total_time,fill=colcode))+
+  scale_fill_manual(values = c("#F8766D","#C77CFF", "#00BFC4"), breaks = c("Tree Sequence", "Tree Sequence with Neutral Mutations", "Standard Non-genealogical"))  facet_grid(model~stat)+
   coord_cartesian(y=c(0, 1.5))+
   theme( axis.title.y.left = element_blank(),legend.position = "none", axis.title.x.bottom = element_blank())
 plot5.2 = ggplot(analysis[stat=="Tajima's D"& x_lab!="Tree Sequence \n Allele-based"], aes(x=stat_type))+
-  geom_boxplot(aes(x=stat_type, y=total_time,fill=stat_type))+
+  geom_boxplot(aes(x=stat_type, y=total_time,fill=colcode))+
   theme_bw()+ 
-  scale_fill_manual(values=c("#00BFC4","#F8766D"))+
-  facet_grid(model~stat)+
+  scale_fill_manual(values = c("#F8766D","#C77CFF", "#00BFC4"), breaks = c("Tree Sequence", "Tree Sequence with Neutral Mutations", "Standard Non-genealogical"))  facet_grid(model~stat)+
   coord_cartesian(y=c(0, 1.5))+
   labs(y="Total time (seconds)", x="")+
   theme(legend.position = "none", axis.title.y.left  = element_blank(), axis.title.x.bottom = element_blank())
 plot5=ggarrange(plot5.1, plot5.2, ncol=1)
 plot5=annotate_figure(plot5, left="Total time (seconds)")
 
-# compile to one plot
 stat_an= ggarrange(plot3,plot4,plot5,  nrow = 1, labels = c("A", "B", "C"))
 stat_an=annotate_figure(stat_an, bottom = "Calculation Type")
 ggexport(stat_an, filename="figure_6.pdf", height=6, width=9)
@@ -231,5 +250,3 @@ ggsave(plot=stat_an, filename="figure_6.jpg", height = 6, width=9)
 
 ## export to xl
 write_xlsx(list( burnin=averages, forward=forward, analysis=analysis_sum), path="benchmark_summary.xlsx",col_names=TRUE)
-
-
