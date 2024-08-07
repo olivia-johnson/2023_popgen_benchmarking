@@ -1,4 +1,4 @@
-# Population genetic simulation: Benchmarking frameworks for non-standard models of natural selection
+# [Population genetic simulation: Benchmarking frameworks for non-standard models of natural selection](https://onlinelibrary.wiley.com/doi/10.1111/1755-0998.13930)
 
 This repository contains the code to replicate the benchmarking conducted in the aforementioned article. 
 
